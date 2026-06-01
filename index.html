@@ -145,7 +145,7 @@
     <p style="font-size:12px;background:var(--teal-light);color:var(--teal-text);padding:8px 10px;border-radius:8px;">Get a free key at <strong>aistudio.google.com</strong> → Get API key → Create API key</p>
     <div class="field-group" style="margin-top:12px;">
       <div class="field-label">Gemini API Key</div>
-      <input type="password" id="gemini-key-input" placeholder="AIza…" style="margin-bottom:12px;" />
+      <input type="password" id="gemini-key-input" placeholder="Paste your Gemini API key here" style="margin-bottom:12px;" />
       <div style="display:flex;gap:8px;">
         <button class="btn full sm" onclick="closeGeminiModal()">Cancel</button>
         <button class="btn primary full sm" onclick="saveGeminiKey()">Save to Drive</button>
@@ -236,7 +236,7 @@ function openGeminiModal(){document.getElementById('gemini-key-input').value=con
 function closeGeminiModal(){document.getElementById('gemini-modal').classList.remove('open');}
 async function saveGeminiKey(){
   const val=document.getElementById('gemini-key-input').value.trim();
-  if(!val||!val.startsWith('AIza')){alert('Enter a valid Gemini key (starts with AIza)');return;}
+  if(!val){alert('Please enter your Gemini API key.');return;}
   config.geminiKey=val;closeGeminiModal();
   try{await saveConfigToDrive();toast('✓ Gemini key saved to Drive');renderSettings();}
   catch(e){toast('Error saving key: '+e.message);}
