@@ -350,6 +350,7 @@ function initGoogleAuth() {
         await loadFromDrive();
         hideLoadingScreen();
         setSyncStatus('synced', '☁ Saved to Drive');
+        scheduleAutoReports();
         navigate(currentView);
       } catch(err) {
         toast('Error: ' + err.message);
@@ -623,7 +624,7 @@ function renderWeekly() {
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                 <span class="tag week">${wk}</span>
                 <span style="font-size:12px;color:var(--text3);">${entries.length} day${entries.length>1?'s':''} logged</span>
-                ${saved ? `<span class="tag ai">✨ AI summary</span>` : ''}
+                ${saved ? `<span class="tag ai">${saved.auto ? '✨ Auto' : '✨ AI'}</span>` : ''}
                 ${saved && saved.emailedAt ? `<span class="gmail-sent-badge">✉ Emailed ${new Date(saved.emailedAt).toLocaleDateString()}</span>` : ''}
               </div>
               <div style="font-size:12px;color:var(--text3);margin-bottom:12px;">${entries.map(e=>fmtDate(e.date)).join('  ·  ')}</div>
@@ -673,7 +674,7 @@ ${logsText}
 Keep it professional, concise, and actionable.`;
 
   try {
-    const summary = await callClaude(prompt);
+    const summary = await callGemini(prompt);
     db.weekly = db.weekly.filter(w => w.week !== wk);
     db.weekly.push({ week: wk, summary, generatedAt: new Date().toISOString() });
     save(); renderWeekly();
@@ -730,7 +731,7 @@ function renderMonthly() {
               <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap;">
                 <span class="tag month">${mo}</span>
                 <span style="font-size:12px;color:var(--text3);">${entries.length} days &nbsp;·&nbsp; ${relWeeks.length} week${relWeeks.length!==1?'s':''} summarised</span>
-                ${saved ? `<span class="tag ai">✨ AI summary</span>` : ''}
+                ${saved ? `<span class="tag ai">${saved.auto ? '✨ Auto' : '✨ AI'}</span>` : ''}
                 ${saved && saved.emailedAt ? `<span class="gmail-sent-badge">✉ Emailed ${new Date(saved.emailedAt).toLocaleDateString()}</span>` : ''}
               </div>
               ${relWeeks.length === 0
@@ -791,7 +792,7 @@ ${weeklyText}
 Keep it professional, strategic, and reflective.`;
 
   try {
-    const summary = await callClaude(prompt);
+    const summary = await callGemini(prompt);
     db.monthly = db.monthly.filter(m => m.month !== mo);
     db.monthly.push({ month: mo, summary, generatedAt: new Date().toISOString() });
     save(); renderMonthly();
@@ -960,30 +961,105 @@ function clearAll() {
   });
 }
 
-// ─── Claude AI ────────────────────────────────────────────────────────────────
-const ANTHROPIC_API_KEY = 'PASTE_YOUR_API_KEY_HERE'; // sk-ant-api03-...
+// ─── Gemini AI ────────────────────────────────────────────────────────────────
+const GEMINI_API_KEY = 'AQ.Ab8RN6LQJNBuOUsclwYXFuq4mf3c796-kJRVTPwqy3TpwLLD6g';
+const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
 
-async function callClaude(prompt) {
-  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'PASTE_YOUR_API_KEY_HERE') {
-    throw new Error('Anthropic API key not set. Open the HTML file and replace PASTE_YOUR_API_KEY_HERE with your key from console.anthropic.com');
-  }
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
+async function callGemini(prompt) {
+  const r = await fetch(GEMINI_URL, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-dangerous-direct-browser-access': 'true'
-    },
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1000,
-      messages: [{ role: 'user', content: prompt }]
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: { maxOutputTokens: 1500, temperature: 0.4 }
     })
   });
   const data = await r.json();
   if (data.error) throw new Error(data.error.message);
-  return data.content?.map(b => b.text||'').join('') || '';
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+}
+
+
+// ─── Auto-generation ──────────────────────────────────────────────────────────
+// Weekly: Friday 23:00 | Monthly: last day of month 21:00
+
+function msUntilNext(targetHour, targetMin, targetDay) {
+  const now = new Date();
+  const next = new Date(now);
+  next.setSeconds(0, 0);
+  next.setHours(targetHour, targetMin);
+  if (targetDay !== null) {
+    let diff = targetDay - now.getDay();
+    if (diff < 0 || (diff === 0 && now >= next)) diff += 7;
+    next.setDate(next.getDate() + diff);
+  }
+  return next - now;
+}
+
+function isLastDayOfMonth() {
+  const t = new Date(); t.setDate(t.getDate() + 1); return t.getDate() === 1;
+}
+
+async function autoGenerateWeeklyIfNeeded() {
+  const now = new Date();
+  if (now.getDay() !== 5) return;
+  const wk = getWeekLabel(now.toISOString().slice(0, 10));
+  if (db.weekly.find(w => w.week === wk)) return;
+  const entries = (groupBy(db.entries, e => getWeekLabel(e.date))[wk] || []);
+  if (entries.length === 0) return;
+  try {
+    const logsText = entries.map(e =>
+      `Date: ${fmtDate(e.date)}\nTasks: ${e.tasks}\nWins: ${e.wins}\nChallenges: ${e.challenges}\nFocus: ${e.focus}\nMiscellaneous: ${e.misc || '—'}`
+    ).join('\n\n---\n\n');
+    const prompt = `You are a professional work journal assistant. Summarise these daily logs for ${wk} into a weekly report with sections: ✅ Completed This Week, 🏆 Key Wins, 🚧 Challenges Faced, 📎 Miscellaneous Notes, 🎯 Focus for Next Week.\n\nLogs:\n${logsText}`;
+    const summary = await callGemini(prompt);
+    db.weekly = db.weekly.filter(w => w.week !== wk);
+    db.weekly.push({ week: wk, summary, generatedAt: new Date().toISOString(), auto: true });
+    save();
+    toast('✨ Weekly report auto-generated for ' + wk + '!');
+    if (currentView === 'weekly') renderWeekly();
+  } catch(e) { console.warn('Auto weekly failed:', e.message); }
+}
+
+async function autoGenerateMonthlyIfNeeded() {
+  if (!isLastDayOfMonth()) return;
+  const now = new Date();
+  const mo = getMonthLabel(now.toISOString().slice(0, 10));
+  if (db.monthly.find(m => m.month === mo)) return;
+  const weeklyByMonth = {};
+  db.weekly.forEach(w => {
+    db.entries.filter(e => getWeekLabel(e.date) === w.week).forEach(e => {
+      const ml = getMonthLabel(e.date);
+      if (!weeklyByMonth[ml]) weeklyByMonth[ml] = [];
+      if (!weeklyByMonth[ml].find(x => x.week === w.week)) weeklyByMonth[ml].push(w);
+    });
+  });
+  const weeklies = weeklyByMonth[mo] || [];
+  if (weeklies.length === 0) return;
+  try {
+    const weeklyText = weeklies.map(w => `=== ${w.week} ===\n${w.summary}`).join('\n\n');
+    const prompt = `You are a professional work journal assistant. Summarise these weekly reports for ${mo} into a monthly report with sections: 📌 Major Projects, ✅ Key Accomplishments, 📈 Growth & Progress, 📎 Miscellaneous Items, 🚧 Recurring Challenges, 🎯 Goals for Next Month.\n\nWeekly reports:\n${weeklyText}`;
+    const summary = await callGemini(prompt);
+    db.monthly = db.monthly.filter(m => m.month !== mo);
+    db.monthly.push({ month: mo, summary, generatedAt: new Date().toISOString(), auto: true });
+    save();
+    toast('✨ Monthly report auto-generated for ' + mo + '!');
+    if (currentView === 'monthly') renderMonthly();
+  } catch(e) { console.warn('Auto monthly failed:', e.message); }
+}
+
+function scheduleAutoReports() {
+  const msW = msUntilNext(23, 0, 5);
+  setTimeout(async () => {
+    await autoGenerateWeeklyIfNeeded();
+    setInterval(autoGenerateWeeklyIfNeeded, 7 * 24 * 60 * 60 * 1000);
+  }, msW);
+
+  const msM = msUntilNext(21, 0, null);
+  setTimeout(async () => {
+    await autoGenerateMonthlyIfNeeded();
+    setInterval(autoGenerateMonthlyIfNeeded, 24 * 60 * 60 * 1000);
+  }, msM > 0 ? msM : 2000);
 }
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
