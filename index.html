@@ -7,14 +7,15 @@
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="Work Journal" />
-<meta name="theme-color" content="#1D9E75" />
+<meta name="theme-color" content="#1D9E75" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#1c1c1a" media="(prefers-color-scheme: dark)" />
 <title>Work Journal</title>
 <link rel="manifest" href="manifest.json" />
 <style>
   :root {
     --bg: #f7f7f5;
     --surface: #ffffff;
-    --surface2: #f2f2ef;
+    --surface2: #f0f0ed;
     --border: #e5e5e0;
     --border2: #d0d0c8;
     --text: #1a1a18;
@@ -35,10 +36,38 @@
     --amber-text: #633806;
     --red: #C0392B;
     --red-light: #fce8e6;
-    --radius: 10px;
-    --radius-lg: 14px;
-    --bottom-nav-h: 64px;
+    --shadow: 0 1px 4px rgba(0,0,0,0.07);
+    --shadow-md: 0 4px 16px rgba(0,0,0,0.10);
+    --radius: 12px;
+    --radius-lg: 16px;
+    --bottom-nav-h: 68px;
     --safe-bottom: env(safe-area-inset-bottom, 0px);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f0f0e;
+      --surface: #1c1c1a;
+      --surface2: #252523;
+      --border: #2e2e2b;
+      --border2: #3a3a36;
+      --text: #f0f0ee;
+      --text2: #a8a8a0;
+      --text3: #65655e;
+      --teal: #25c490;
+      --teal-dark: #1a9e72;
+      --teal-light: #0d2b20;
+      --teal-text: #5ee8b0;
+      --blue-light: #0d1e35;
+      --blue-text: #7ab8f5;
+      --purple-light: #1a1840;
+      --purple-text: #b0aaff;
+      --amber-light: #2a1d06;
+      --amber-text: #f0b84a;
+      --red-light: #2a0d0d;
+      --shadow: 0 1px 4px rgba(0,0,0,0.3);
+      --shadow-md: 0 4px 16px rgba(0,0,0,0.4);
+    }
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -722,6 +751,7 @@ function saveEntry() {
   editingEntry = null;
   renderDaily();
   toast('✓ Entry saved! Syncing to Drive…');
+  cancelReminder(); // entry logged — cancel tonight's reminder
 }
 
 function editEntry(id) {
@@ -984,6 +1014,39 @@ async function emailReport(type, enc) {
   } catch(err) { toast('Email failed: ' + err.message); }
 }
 
+// ─── Notifications helper ──────────────────────────────────────────────────
+async function requestNotifPermission() {
+  if (!('Notification' in window)) {
+    alert('Notifications are not supported on this browser.');
+    return;
+  }
+  const perm = await Notification.requestPermission();
+  if (perm === 'granted') {
+    toast('✓ Reminders enabled! You\'ll be notified at 9 PM on weekdays.');
+    scheduleReminderIfNeeded();
+    updateNotifStatus();
+  } else {
+    toast('Notifications blocked. Enable them in your phone\'s app settings for Chrome.');
+  }
+}
+
+function updateNotifStatus() {
+  const el = document.getElementById('notif-status');
+  if (!el) return;
+  if (!('Notification' in window)) {
+    el.innerHTML = '<span style="color:var(--text3);">Not supported on this browser.</span>';
+    return;
+  }
+  const perm = Notification.permission;
+  if (perm === 'granted') {
+    el.innerHTML = '<span style="color:var(--teal);">✓ Notifications enabled</span>';
+  } else if (perm === 'denied') {
+    el.innerHTML = '<span style="color:var(--red);">✗ Blocked — enable in Chrome → Site Settings → Notifications</span>';
+  } else {
+    el.innerHTML = '<span style="color:var(--text3);">Not yet enabled</span>';
+  }
+}
+
 // ─── Settings ──────────────────────────────────────────────────────────────
 function renderSettings() {
   const el = document.getElementById('main-content');
@@ -1032,6 +1095,15 @@ function renderSettings() {
     </div>
 
     <div class="card">
+      <div style="font-weight:600;margin-bottom:6px;">🔔 Reminder Notifications</div>
+      <div style="font-size:13px;color:var(--text2);margin-bottom:12px;">
+        Get a notification at <strong>9:00 PM</strong> on weekdays (Mon–Fri) if you haven't logged that day yet.
+      </div>
+      <div id="notif-status" style="font-size:13px;margin-bottom:12px;"></div>
+      <button class="btn full sm" onclick="requestNotifPermission()">Enable Reminders</button>
+    </div>
+
+    <div class="card">
       <div style="font-weight:600;margin-bottom:6px;">📤 Local Backup</div>
       <div style="font-size:13px;color:var(--text2);margin-bottom:10px;">Download a JSON copy of all your data.</div>
       <button class="btn full sm" onclick="exportData()">⬇ Download JSON backup</button>
@@ -1043,7 +1115,8 @@ function renderSettings() {
       <button class="btn full sm" style="border-color:#E24B4A;color:#A32D2D;" onclick="clearAll()">🗑 Clear all data</button>
     </div>
     <div style="height:20px;"></div>
-  `;
+  \`;
+  updateNotifStatus();
 }
 
 function handleSignOut() {
@@ -1087,10 +1160,20 @@ function clearAll() {
 }
 
 // ─── Claude ────────────────────────────────────────────────────────────────
+const ANTHROPIC_API_KEY = 'PASTE_YOUR_API_KEY_HERE'; // sk-ant-api03-...
+
 async function callClaude(prompt) {
+  if (!ANTHROPIC_API_KEY || ANTHROPIC_API_KEY === 'PASTE_YOUR_API_KEY_HERE') {
+    throw new Error('Anthropic API key not set. Open the HTML file and replace PASTE_YOUR_API_KEY_HERE with your key from console.anthropic.com');
+  }
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': ANTHROPIC_API_KEY,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true'
+    },
     body: JSON.stringify({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 1000,
@@ -1102,10 +1185,56 @@ async function callClaude(prompt) {
   return data.content?.map(b => b.text||'').join('') || '';
 }
 
+// ─── Notifications ─────────────────────────────────────────────────────────
+// Fires at 9 PM on Mon-Fri if today has no entry logged yet.
+async function scheduleReminderIfNeeded() {
+  if (!('Notification' in window) || !('serviceWorker' in navigator)) return;
+
+  const now = new Date();
+  const day = now.getDay(); // 0=Sun,6=Sat
+  if (day === 0 || day === 6) return; // skip weekends
+
+  // Already logged today?
+  const todayStr = now.toISOString().slice(0, 10);
+  const loggedToday = db.entries.some(e => e.date === todayStr);
+  if (loggedToday) {
+    cancelReminder();
+    return;
+  }
+
+  // Request permission if not yet granted
+  if (Notification.permission === 'default') {
+    const perm = await Notification.requestPermission();
+    if (perm !== 'granted') return;
+  }
+  if (Notification.permission !== 'granted') return;
+
+  // Calculate ms until 9 PM today
+  const fireAt = new Date(now);
+  fireAt.setHours(21, 0, 0, 0);
+  const msUntilFire = fireAt - now;
+
+  if (msUntilFire < 0) return; // already past 9 PM
+
+  const reg = await navigator.serviceWorker.ready;
+  reg.active?.postMessage({ type: 'SCHEDULE_REMINDER', msUntilFire });
+}
+
+function cancelReminder() {
+  navigator.serviceWorker.ready.then(reg => {
+    reg.active?.postMessage({ type: 'CANCEL_REMINDER' });
+  });
+}
+
+// Re-check reminder whenever an entry is saved
+const _origSave = save;
+
 // ─── Service Worker ────────────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js').catch(() => {});
+    navigator.serviceWorker.register('sw.js')
+      .then(() => scheduleReminderIfNeeded())
+      .catch(() => {});
   });
 }
 
