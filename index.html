@@ -382,8 +382,8 @@ function deleteEntry(id){if(!confirm('Delete this entry?'))return;db.entries=db.
 // ── Gemini AI ──────────────────────────────────────────────────────────────
 async function callGemini(prompt){
   if(!config.geminiKey)throw new Error('No Gemini key. Go to Settings → Add Gemini Key.');
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${config.geminiKey}`,
-    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:1500,temperature:0.4}})});
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${config.geminiKey}`,
+    {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{maxOutputTokens:1500}})});
   const d=await r.json();if(d.error)throw new Error(d.error.message);
   return d.candidates?.[0]?.content?.parts?.[0]?.text||'';
 }
