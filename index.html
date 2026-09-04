@@ -422,7 +422,29 @@ async function generateWeekly(encWk,auto=false){
   const entries=(groupBy(db.entries,e=>getWeekLabel(e.date))[wk]||[]);if(!entries.length)return;
   if(!auto){const btn=document.getElementById('wbtn-'+encWk);if(btn){btn.innerHTML='<span class="spinner"></span> Summarising…';btn.disabled=true;}}
   const logsText=entries.map(e=>`Date: ${fmtDate(e.date)}\nTasks: ${e.tasks}\nWins: ${e.wins}\nChallenges: ${e.challenges}\nFocus: ${e.focus}\nMisc: ${e.misc||'—'}`).join('\n\n---\n\n');
-  const prompt=`You are a professional work journal assistant. Summarise these daily logs for ${wk} into a weekly report with these sections:\n## ✅ Completed This Week\n## 🏆 Key Wins\n## 🚧 Challenges Faced\n## 📎 Miscellaneous Notes\n## 🎯 Focus for Next Week\n\nLogs:\n${logsText}\n\nBe professional, concise, actionable.`;
+  const prompt=`You are a professional work assistant helping an engineer prepare a weekly status report for their manager. Based on the following daily work logs, generate a formal weekly report.
+
+Formatting rules:
+- Use plain text only. No emojis, no markdown symbols like **, no hashtags.
+- Use bullet points with a dash (-) for all lists.
+- Every section must have a clear heading followed by a colon on its own line.
+- Keep language formal, concise, and professional.
+
+Use this exact structure:
+
+Weekly Status Report - ${wk}
+
+Tasks Completed:
+- (list each completed task clearly)
+
+Key Achievements:
+- (list notable wins or milestones reached)
+
+Challenges and Blockers:
+- (list any difficulties faced and how they were handled or are pending)
+
+Daily logs:
+${logs}`;
   try{
     const summary=await callGemini(prompt);
     db.weekly=db.weekly.filter(w=>w.week!==wk);
